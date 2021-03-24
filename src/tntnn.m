@@ -352,6 +352,7 @@ while (p > 0)
     % because we just use the Cholesky factor as a preconditioner.
     epsilon = epsilon * 10;
     epsilon
+    [m n] = size(AA);
     AA = AA + (epsilon * eye(n));
     BB = AA(free_set,free_set);
     if (lambda > 0)
