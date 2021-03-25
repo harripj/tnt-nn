@@ -95,6 +95,8 @@ else
 end
 AAsize = size(AA);
 
+% disp(size(AA));
+
 % ===============================================================
 % AA is a symmetric and positive definite (probably) n x n matrix.
 % If A did not have full rank, then AA is positive semi-definite.
@@ -136,7 +138,8 @@ binding_set = [];
 [ score, x, residual, free_set, binding_set, ...
   AA, epsilon, dels, lps ] = lsq_solve(A, b, lambda, ...
   AA, epsilon, free_set, binding_set, n);
-      
+
+% disp(score);
 % ===============================================================
 % Outer Loop.
 % ===============================================================
@@ -161,6 +164,7 @@ while (1)
     % Compute the gradient of the "Normal Equations".
     % ===============================================================
     gradient = A' * residual;
+    % disp(size(gradient))
      
     % ===============================================================
     % Check the gradient components.
@@ -330,7 +334,6 @@ B = A(:,free_set);
 % columns of AA. The free_set provides a map from the rows
 % and columns of BB to rows and columns of AA.
 BB = AA(free_set,free_set);
-
 % ------------------------------------------------------------
 % Adjust with Tikhonov regularization parameter lambda.
 % ------------------------------------------------------------
@@ -346,6 +349,7 @@ end
 % =============================================================
 [R,p] = chol(BB); % O(n^3/3)
 while (p > 0)
+    % disp(p)
     % It may be necessary to add to the diagonal of B'B to avoid 
     % taking the sqare root of a negative number when there are 
     % rounding errors on a nearly singular matrix. That's still OK 
@@ -380,6 +384,8 @@ while (1)
     % the "free" variables.
     % ------------------------------------------------------------
     [reduced_x k] = pcgnr(B,b,R);
+
+    % disp([size(reduced_x) k])
     
     if( k > lsq_loops)
         lsq_loops = k;
@@ -443,7 +449,7 @@ while (1)
     % and columns of BB to rows and columns of AA.
     clear BB;
     BB = AA(free_set,free_set);
-    
+    % disp([size(B) size(BB)]);
     % ------------------------------------------------------------
     % Adjust with Tikhonov regularization parameter lambda.
     % ------------------------------------------------------------
@@ -504,7 +510,11 @@ function [ x, k ] = pcgnr ( A, b, R )
     y = R' \ r_hat; % back_substitution, O(n^2)
     z = R \ y; % back_substitution, O(n^2)
     p = z;
+    
     gamma = dot(z,r_hat);
+    % disp(gamma)
+    % disp([size(gamma) size(r_hat) size(y) size(z)]);
+    % disp([norm(b,1) norm(r_hat,1) norm(z,1)])
     prev_rr = -1;
     for k = 1:n
         w = A * p; % matrix_x_vector, O(mn)
@@ -522,6 +532,7 @@ function [ x, k ] = pcgnr ( A, b, R )
         % Enforce continuous improvement in the score.
         % ---------------------------------------------
         rr = dot(r_hat,r_hat);
+        % disp(rr)
         if ((prev_rr >= 0) && (prev_rr <= rr))
             x = x_prev;
             return;
