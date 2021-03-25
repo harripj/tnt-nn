@@ -1,6 +1,5 @@
 import numpy as np
 import numba
-from numpy.lib.ufunclike import isposinf
 
 
 @numba.njit
@@ -8,9 +7,10 @@ def mdot(a, b):
     """
     Emulate Matlab dot function.
     """
-    return (a.conj() * b).sum(0)
+    return (a.conj() * b).sum(axis=0)
 
 
+# @numba.njit
 def is_pos_def(arr):
     """
     Test whether an array is positive definite.
@@ -40,7 +40,7 @@ def H(arr):
     return arr.conj().T
 
 
-def nnls_tnt(A, b, lam=0.0, rel_tol=0, red_c=0.2, exp_c=1.2):
+def nnls_tnt(A, b, lam=0.0, rel_tol=0.0, red_c=0.2, exp_c=1.2):
     """
     Emulate nnls_tnt from tnt.m.
 
@@ -59,20 +59,23 @@ def nnls_tnt(A, b, lam=0.0, rel_tol=0, red_c=0.2, exp_c=1.2):
     """
     m, n = A.shape
     AA = np.dot(H(A), A)
+    dtype = AA.dtype
 
     # define small epsilon value, related to the size of A
-    epsilon = 10 * np.finfo(A.dtype).eps * np.linalg.norm(AA, 1)
-    AA = AA + epsilon * np.eye(n)
+    # force same dtypes
+
+    epsilon = dtype.type(10 * np.finfo(A.dtype).eps) * np.linalg.norm(AA, 1)
+    AA = AA + epsilon * np.eye(n, dtype=dtype)
 
     # emulate lsq_solver in tnt.m
-    x = np.zeros(n)
+    x = np.zeros(n, dtype=dtype)
     free_set = np.arange(n)[::-1]
     binding_set = np.zeros(
         0, dtype=int
     )  # in Matlab code this var is initialized then set to empty list...
     insertion_set = np.zeros(n, dtype=int)
-    residual = np.zeros(n)
-    gradient = np.zeros(n)
+    residual = np.zeros(n, dtype=dtype)
+    gradient = np.zeros(n, dtype=dtype)
 
     score, x, residual, free_set, binding_set, AA, epsilon, dels, lps = lsq_solve(
         A, b, lam, AA, epsilon, free_set, binding_set, n
@@ -231,7 +234,6 @@ def lsq_solve(A, b, lam, AA, epsilon, free_set, binding_set, deletions_per_loop)
 
     while True:
         loops += 1
-
         # ------------------------------------------------------------
         # Use PCGNR to find the unconstrained optimum in
         # the "free" variables.
@@ -320,18 +322,18 @@ def lsq_solve(A, b, lam, AA, epsilon, free_set, binding_set, deletions_per_loop)
     # ------------------------------------------------------------
     # Compute the norm of the residual.
     # ------------------------------------------------------------
-    score = np.sqrt(mdot(residual * residual))
+    score = np.sqrt(mdot(residual, residual))
 
     return score, x, residual, free_set, binding_set, AA, epsilon, dels, loops
 
 
 @numba.njit
-def pcgnr(A, b, R):
+def pcgnr(A, b, R, atol=1e-6):
     """
     Emulate pcgnr from tnt.m.
     """
     m, n = A.shape
-    x = np.zeros(n)
+    x = np.zeros(n, dtype=A.dtype)
     r = b
     r_hat = np.dot(H(A), r)  # % matrix_x_vector, O(mn)
     y = np.linalg.solve(H(R), r_hat)  # back_substitution, O(n^2)
@@ -344,7 +346,7 @@ def pcgnr(A, b, R):
     for k in range(n):
         w = np.dot(A, p)  # matrix_x_vector, O(mn)
         ww = mdot(w, w)
-        if np.isclose(ww, 0):
+        if np.abs(ww) <= atol:
             break
 
         alpha = gamma / ww
@@ -352,6 +354,7 @@ def pcgnr(A, b, R):
         x = x + alpha * p
         r = b - np.dot(A, x)  # matrix_x_vector, O(mn)
         r_hat = np.dot(H(A), r)  # matrix_x_vector, O(mn)
+        x_prev = x
 
         rr = mdot(r_hat, r_hat)
         if prev_rr >= 0 and prev_rr <= rr:
@@ -365,13 +368,13 @@ def pcgnr(A, b, R):
         beta = gamma_new / gamma
         p = z + beta * p
         gamma = gamma_new
-        if np.isclose(gamma, 0):
+        if np.abs(gamma) <= atol:
             break
 
     return x, k
 
 
-@numba.njit
+# @numba.njit
 def cholesky_delete(R, BB, deletion_set):
     """
     Emulate the cholesky_delete fn from tnt.m.
@@ -396,11 +399,11 @@ def cholesky_delete(R, BB, deletion_set):
         for i in range(num_deletions):
             j = deletion_set[i]
 
-            #             % =============================================================
-            #             % This function is just a stripped version of Matlab's qrdelete.
-            #             % Stolen from:
-            #             % http://pmtksupport.googlecode.com/svn/trunk/lars/larsen.m
-            #             % =============================================================
+            # =============================================================
+            # This function is just a stripped version of Matlab's qrdelete.
+            # Stolen from:
+            # http://pmtksupport.googlecode.com/svn/trunk/lars/larsen.m
+            # =============================================================
             R = np.delete(R, j, axis=1)  # % remove column j
             n = R.shape[1]
             for k in range(j, n):
