@@ -10,17 +10,17 @@ def mdot(a, b):
     return (a.conj() * b).sum(axis=0)
 
 
-# @numba.njit
+@numba.njit
 def is_pos_def(arr):
     """
-    Test whether an array is positive definite.
+    Test whether a symmetric array is positive definite.
 
     Returns
     -------
     res: bool
         True if positive_definite.
     """
-    return np.all(np.linalg.eigvals(arr) > 0)
+    return np.all(np.linalg.eigvalsh(arr) > 0)
 
 
 @numba.njit
