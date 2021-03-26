@@ -56,6 +56,7 @@ def H(arr):
     return arr.conj().T
 
 
+@numba.njit
 def nnls_tnt(A, b, lam=0.0, rel_tol=0.0, red_c=0.2, exp_c=1.2):
     """
     Emulate nnls_tnt from tnt.m.
@@ -75,23 +76,22 @@ def nnls_tnt(A, b, lam=0.0, rel_tol=0.0, red_c=0.2, exp_c=1.2):
     """
     m, n = A.shape
     AA = np.dot(H(A), A)
-    dtype = AA.dtype
 
     # define small epsilon value, related to the size of A
     # force same dtypes
 
-    epsilon = dtype.type(10 * np.finfo(A.dtype).eps) * np.linalg.norm(AA, 1)
-    AA = AA + epsilon * np.eye(n, dtype=dtype)
+    epsilon = AA.dtype.type(np.finfo(A.dtype).eps * np.linalg.norm(AA, 1))
+    AA += epsilon * np.eye(n, dtype=AA.dtype)
 
     # emulate lsq_solver in tnt.m
-    x = np.zeros(n, dtype=dtype)
+    x = np.zeros(n, dtype=AA.dtype)
     free_set = np.arange(n)[::-1]
     binding_set = np.zeros(
-        0, dtype=int
+        0, dtype=np.int_
     )  # in Matlab code this var is initialized then set to empty list...
-    insertion_set = np.zeros(n, dtype=int)
-    residual = np.zeros(n, dtype=dtype)
-    gradient = np.zeros(n, dtype=dtype)
+    insertion_set = np.zeros(n, dtype=np.int_)
+    residual = np.zeros(n, dtype=AA.dtype)
+    gradient = np.zeros(n, dtype=AA.dtype)
 
     score, x, residual, free_set, binding_set, AA, epsilon, dels, lps = lsq_solve(
         A, b, lam, AA, epsilon, free_set, binding_set, n
@@ -165,7 +165,7 @@ def nnls_tnt(A, b, lam=0.0, rel_tol=0.0, red_c=0.2, exp_c=1.2):
             # ==============================================================
             # Move variables from "binding" to "free".
             # ==============================================================
-            free_set = np.concatenate([free_set, binding_set[insertion_set]])
+            free_set = np.concatenate((free_set, binding_set[insertion_set]))
             binding_set = np.delete(binding_set, insertion_set)
 
             # ===============================================================
@@ -224,19 +224,19 @@ def lsq_solve(A, b, lam, AA, epsilon, free_set, binding_set, deletions_per_loop)
 
     if lam > 0:
         for i in range(free_set.size):
-            B[i, i] = B[i, i] + lam
-            BB[i, i] = BB[i, i] + lam * lam
+            B[i, i] += BB.dtype.type(lam)
+            BB[i, i] += BB.dtype.type(lam * lam)
 
     if is_pos_def(BB):
         R = H(np.linalg.cholesky(BB))
     else:
         while True:
-            epsilon *= 10
+            epsilon *= AA.dtype.type(10)
             AA += np.eye(AA.shape[0], AA.shape[1], dtype=AA.dtype) * epsilon
             BB = AA[free_set][:, free_set]
             if lam > 0:
                 for i in range(free_set.size):
-                    BB[i, i] = BB[i, i] + lam * lam
+                    BB[i, i] += BB.dtype.type(lam * lam)
             if is_pos_def(BB):
                 R = H(np.linalg.cholesky(BB))
                 break
@@ -251,6 +251,7 @@ def lsq_solve(A, b, lam, AA, epsilon, free_set, binding_set, deletions_per_loop)
 
     while True:
         loops += 1
+
         # ------------------------------------------------------------
         # Use PCGNR to find the unconstrained optimum in
         # the "free" variables.
@@ -316,9 +317,9 @@ def lsq_solve(A, b, lam, AA, epsilon, free_set, binding_set, deletions_per_loop)
         # Adjust with Tikhonov regularization parameter lambda.
         # ------------------------------------------------------------
         if lam > 0:
-            for i in range(free_set.size):
-                B[i, i] = B[i, i] + lam
-                BB[i, i] = BB[i, i] + lam * lam
+            for i in range(len(free_set)):
+                B[i, i] += lam
+                BB[i, i] += lam * lam
 
         # ------------------------------------------------------------
         # Compute R, the Cholesky factor.
@@ -353,6 +354,7 @@ def pcgnr(A, b, R, atol=1e-6):
     x = np.zeros(n, dtype=A.dtype)
     r = b
     r_hat = np.dot(H(A), r)  # % matrix_x_vector, O(mn)
+
     y = np.linalg.solve(H(R), r_hat)  # back_substitution, O(n^2)
     z = np.linalg.solve(R, y)  # back_substitution, O(n^2)
     p = z
@@ -413,7 +415,7 @@ def cholesky_delete(R, BB, deletion_set):
             # nonnegativity tests required to create the deleted_set.
             raise ValueError("This should not happen!")
     else:
-        raise ValueError("Not implemented- Numba")
+        raise ValueError("Not implemented: Numba")
         # for i in range(num_deletions):
         #     j = deletion_set[i]
 
