@@ -11,6 +11,22 @@ def mdot(a, b):
 
 
 @numba.njit
+def delete_along_axis_2d(arr, indices, axis):
+    """
+    Emulate np.delete for 2d arrays.
+    """
+    mask = np.ones(arr.shape[axis], dtype=np.bool_)
+    mask[indices] = False
+
+    if not axis:
+        out = arr[mask]
+    elif axis == 1:
+        out = arr[:, mask]
+
+    return out
+
+
+@numba.njit
 def is_pos_def(arr):
     """
     Test whether a symmetric array is positive definite.
@@ -194,6 +210,7 @@ def nnls_tnt(A, b, lam=0.0, rel_tol=0.0, red_c=0.2, exp_c=1.2):
     return x, AA, status, OuterLoop, TotalInnerLoops
 
 
+@numba.njit
 def lsq_solve(A, b, lam, AA, epsilon, free_set, binding_set, deletions_per_loop):
     """
     Emulate the lsq_solve fn from tnt.m.
@@ -203,7 +220,7 @@ def lsq_solve(A, b, lam, AA, epsilon, free_set, binding_set, deletions_per_loop)
 
     # BB should be a square array
     B = A[:, free_set]
-    BB = AA[free_set[:, np.newaxis], free_set]
+    BB = AA[free_set][:, free_set]
 
     if lam > 0:
         for i in range(free_set.size):
@@ -215,8 +232,8 @@ def lsq_solve(A, b, lam, AA, epsilon, free_set, binding_set, deletions_per_loop)
     else:
         while True:
             epsilon *= 10
-            AA += np.eye(AA.shape[0], AA.shape[1]) * epsilon
-            BB = AA[free_set[:, np.newaxis], free_set]
+            AA += np.eye(AA.shape[0], AA.shape[1], dtype=AA.dtype) * epsilon
+            BB = AA[free_set][:, free_set]
             if lam > 0:
                 for i in range(free_set.size):
                     BB[i, i] = BB[i, i] + lam * lam
@@ -230,7 +247,7 @@ def lsq_solve(A, b, lam, AA, epsilon, free_set, binding_set, deletions_per_loop)
     dels = 0
     loops = 0
     lsq_loops = 0
-    del_hist = np.zeros(0, dtype=int)
+    del_hist = np.zeros(0, dtype=np.int_)
 
     while True:
         loops += 1
@@ -269,14 +286,14 @@ def lsq_solve(A, b, lam, AA, epsilon, free_set, binding_set, deletions_per_loop)
             deletion_set = deletion_set[:deletions_per_loop]
 
         deletion_set = np.sort(deletion_set)[::-1]
-        del_hist = set(del_hist).union(set(deletion_set))
+        del_hist = np.unique(np.concatenate((del_hist, deletion_set)))
         # del_hist = np.union1d(del_hist, deletion_set)
         dels = dels + deletion_set.size
 
         # ------------------------------------------------------------
         # Move the variables from "free" to "binding".
         # ------------------------------------------------------------
-        binding_set = np.concatenate([binding_set, free_set[deletion_set]])
+        binding_set = np.concatenate((binding_set, free_set[deletion_set]))
         free_set = np.delete(free_set, deletion_set)
 
         # ------------------------------------------------------------
@@ -293,7 +310,7 @@ def lsq_solve(A, b, lam, AA, epsilon, free_set, binding_set, deletions_per_loop)
         # BB is a symmetric matrix that has a subset of rows and
         # columns of AA. The free_set provides a map from the rows
         # and columns of BB to rows and columns of AA.
-        BB = AA[free_set[:, np.newaxis], free_set]
+        BB = AA[free_set][:, free_set]
 
         # ------------------------------------------------------------
         # Adjust with Tikhonov regularization parameter lambda.
@@ -311,7 +328,7 @@ def lsq_solve(A, b, lam, AA, epsilon, free_set, binding_set, deletions_per_loop)
     # ------------------------------------------------------------
     # Unscramble the column indices to get the full (unreduced) x.
     # ------------------------------------------------------------
-    x = np.zeros(A.shape[1])
+    x = np.zeros(A.shape[1], dtype=A.dtype)
     x[free_set] = reduced_x
 
     # ------------------------------------------------------------
@@ -374,7 +391,7 @@ def pcgnr(A, b, R, atol=1e-6):
     return x, k
 
 
-# @numba.njit
+@numba.njit
 def cholesky_delete(R, BB, deletion_set):
     """
     Emulate the cholesky_delete fn from tnt.m.
@@ -396,30 +413,32 @@ def cholesky_delete(R, BB, deletion_set):
             # nonnegativity tests required to create the deleted_set.
             raise ValueError("This should not happen!")
     else:
-        for i in range(num_deletions):
-            j = deletion_set[i]
+        raise ValueError("Not implemented- Numba")
+        # for i in range(num_deletions):
+        #     j = deletion_set[i]
 
-            # =============================================================
-            # This function is just a stripped version of Matlab's qrdelete.
-            # Stolen from:
-            # http://pmtksupport.googlecode.com/svn/trunk/lars/larsen.m
-            # =============================================================
-            R = np.delete(R, j, axis=1)  # % remove column j
-            n = R.shape[1]
-            for k in range(j, n):
-                # p = range(k, k + 1)
-                p = k
-                G = givens_qr(R[p, k])  # remove extra element in col
-                if k < n:
-                    R[p, np.arange(k, n)] = G * R(
-                        p, np.arange(k, n)
-                    )  # adjust rest of row
+        #     # =============================================================
+        #     # This function is just a stripped version of Matlab's qrdelete.
+        #     # Stolen from:
+        #     # http://pmtksupport.googlecode.com/svn/trunk/lars/larsen.m
+        #     # =============================================================
+        #     R = delete_along_axis_2d(R, j, 1)  # % remove column j
+        #     n = R.shape[1]
+        #     for k in range(j, n):
+        #         # p = range(k, k + 1)
+        #         p = k
+        #         G = givens_qr(R[p, k])  # remove extra element in col
+        #         if k < n:
+        #             R[p, np.arange(k, n)] = G * R(
+        #                 p, np.arange(k, n)
+        #             )  # adjust rest of row
 
-            R = R[:-1, :]  # remove zero'ed out row
+        #     R = R[:-1, :]  # remove zero'ed out row
     return R
 
 
 # GvL pg. 216 : algo 5.1.3 * see also anderson(2000) via wikipedia for continuity concerns
+@numba.njit
 def zeroing_givens_coeffs(x, z):
     """for the values x,z compute cos th, sin th
     s.t. applying a Givens rotation G(cos th,sin th)
@@ -432,6 +451,7 @@ def zeroing_givens_coeffs(x, z):
 
 
 # GvL, pg. 216 .... Section 5.1.9
+@numba.njit
 def left_givensT(cs, A, r1, r2):
     """ update A <- G.T.dot(A) ... affects rows r1 and r2 """
     c, s = cs
@@ -440,6 +460,7 @@ def left_givensT(cs, A, r1, r2):
 
 
 # A.dot(G) .... affects two cols of A
+@numba.njit
 def right_givens(cs, A, c1, c2):
     """ update A <- A.dot(G) ... affects cols c1 and c2 """
     c, s = cs
@@ -447,11 +468,12 @@ def right_givens(cs, A, c1, c2):
     A[:, [c1, c2]] = np.dot(A[:, [c1, c2]], givens)
 
 
+@numba.njit
 def givens_qr(A):
     m, n = A.shape
     Q = np.eye(m)
     for c in range(n):
-        for r in reversed(range(c + 1, m)):  # m-1, m-2, ... c+2, c+1
+        for r in np.arange(c + 1, m)[::-1]:  # m-1, m-2, ... c+2, c+1
             # in this row and the previous row, use zeroing givens to
             # place a zero in the lower row
             coeffs = zeroing_givens_coeffs(A[r - 1, c], A[r, c])
